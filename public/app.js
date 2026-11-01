@@ -30,6 +30,69 @@ const templates = {
 };
 function toast(message) { $('toast').textContent = message; $('toast').classList.remove('hidden'); clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => $('toast').classList.add('hidden'), 5000); }
 function error(message) { $('errors').textContent = message; $('errors').classList.remove('hidden'); }
+const DEFAULT_INSTRUCTIONS = 'あなたは親しみやすい日本語の音声アシスタントです。簡潔に話してください。\nBackend tools: 調査・複雑な推論はバックエンドへ委譲できます。\nGenerate <|SpawnThinking|> when:\n- ユーザーの要求に外部情報の調査や複雑な推論が必要な場合。\n結果を受け取る前に成功や調査内容を断定しないでください。';
+function setupInstructionPresets() {
+  const key = 'gpt-live-lab.instructions.v1';
+  const note = text => { $('instructionsSaveStatus').textContent = text; };
+  const read = () => {
+    const saved = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!Array.isArray(saved) || saved.some(item => !item || typeof item.id !== 'string' || typeof item.name !== 'string' || typeof item.content !== 'string')) {
+      throw new Error('保存済みinstructionsの形式が不正です');
+    }
+    return saved;
+  };
+  const updateButtons = () => {
+    const empty = !$('savedInstructions').value;
+    $('loadInstructions').disabled = empty;
+    $('deleteInstructions').disabled = empty;
+  };
+  const renderSaved = (items, selected = $('savedInstructions').value) => {
+    $('savedInstructions').replaceChildren(new Option('保存した内容を選択', ''));
+    for (const item of items) $('savedInstructions').add(new Option(item.name, item.id));
+    if (items.some(item => item.id === selected)) $('savedInstructions').value = selected;
+    updateButtons();
+  };
+  const action = fn => () => { try { fn(); } catch (e) { note(`保存操作に失敗しました: ${e.message}`); } };
+  $('savedInstructions').onchange = updateButtons;
+  $('resetInstructions').onclick = () => {
+    $('instructions').value = DEFAULT_INSTRUCTIONS;
+    $('instructionName').value = '';
+    $('savedInstructions').value = '';
+    updateButtons();
+    dirty();
+    note('初期instructionsを標準の内容に戻しました。保存済みの内容は残ります。次回接続から反映します。');
+  };
+  $('saveInstructions').onclick = action(() => {
+    const name = $('instructionName').value.trim();
+    if (!name) { note('保存名を入力してください。'); $('instructionName').focus(); return; }
+    const items = read();
+    if (items.some(item => item.name === name)) { note('同じ名前が保存されています。別の保存名を指定してください。'); return; }
+    const item = { id: crypto.randomUUID(), name, content: $('instructions').value };
+    items.push(item);
+    localStorage.setItem(key, JSON.stringify(items));
+    renderSaved(items, item.id);
+    note(`「${name}」をこのブラウザに保存しました。`);
+  });
+  $('loadInstructions').onclick = action(() => {
+    const item = read().find(item => item.id === $('savedInstructions').value);
+    if (!item) { renderSaved(read()); return; }
+    $('instructions').value = item.content;
+    $('instructionName').value = item.name;
+    dirty();
+    note(`「${item.name}」を読み込みました。次回接続から反映します。`);
+  });
+  $('deleteInstructions').onclick = action(() => {
+    const items = read();
+    const item = items.find(item => item.id === $('savedInstructions').value);
+    if (!item || !confirm(`保存済みの「${item.name}」を削除しますか？ 編集中の内容は残ります。`)) return;
+    const remaining = items.filter(saved => saved.id !== item.id);
+    localStorage.setItem(key, JSON.stringify(remaining));
+    renderSaved(remaining);
+    note(`保存済みの「${item.name}」を削除しました。`);
+  });
+  window.addEventListener('storage', event => { if (event.key === key || event.key === null) action(() => renderSaved(read()))(); });
+  action(() => renderSaved(read()))();
+}
 function command(m) { if (socket?.readyState !== WebSocket.OPEN) throw new Error('ローカルサーバーへ接続されていません'); socket.send(JSON.stringify(m)); }
 function send(event) { if (status !== 'connected') throw new Error('Liveへ接続してください'); command({ kind: 'send', event }); }
 function bind(id, action) { $(id).addEventListener('click', async () => { try { await action(); } catch (e) { error(e.message); } }); }
@@ -163,11 +226,12 @@ for (const id of ['search','filter','showAudio']) $(id).addEventListener('input'
 for (const id of ['title','model','voice','instructions','initialText','delay','mode','code','waitMs','result']) $(id).addEventListener('input', dirty);
 $('method').onchange = preview; $('content').oninput = preview; $('rawTemplate').onchange = rawTemplate;
 for (const name of Object.keys(templates)) $('rawTemplate').add(new Option(name, name));
-$('instructions').value = 'あなたは親しみやすい日本語の音声アシスタントです。簡潔に話してください。\nBackend tools: 調査・複雑な推論はバックエンドへ委譲できます。\nGenerate <|SpawnThinking|> when:\n- ユーザーの要求に外部情報の調査や複雑な推論が必要な場合。\n結果を受け取る前に成功や調査内容を断定しないでください。';
+$('instructions').value = DEFAULT_INSTRUCTIONS;
 $('code').value = presets('silent');
 try { const draft = await fetch('/api/draft').then(r => r.json()); if (draft) applyConfig(draft); } catch {}
 preview(); rawTemplate(); setStatus('disconnected'); openControl(); render();
 setupVoices({ dirty, toast });
+setupInstructionPresets();
 try { const { mountEditors } = await import('/editors.bundle.js'); mountEditors(); }
 catch { toast('コードエディタを読み込めませんでした。通常の入力欄で編集できます。'); }
 window.addEventListener('beforeunload', () => socket?.close());
