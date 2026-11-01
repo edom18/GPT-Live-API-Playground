@@ -1,5 +1,9 @@
 import { basicSetup, EditorView } from 'codemirror';
-import { Compartment, Transaction } from '@codemirror/state';
+import { Compartment, Transaction, EditorState, Prec } from '@codemirror/state';
+import { keymap } from '@codemirror/view';
+import { indentUnit } from '@codemirror/language';
+import { indentLess } from '@codemirror/commands';
+import { insertFourSpaces } from './indent.js';
 import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -23,6 +27,8 @@ export function mountEditors() {
       doc: textarea.value,
       parent: host,
       extensions: [
+        Prec.highest(keymap.of([{ key: 'Tab', run: insertFourSpaces, shift: indentLess }])),
+        indentUnit.of('    '), EditorState.tabSize.of(4),
         mode.of(enabled ? vim() : []), basicSetup, language, oneDark,
         EditorView.cspNonce.of(document.querySelector('meta[name="style-nonce"]').content),
         EditorView.lineWrapping,
