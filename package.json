@@ -1,0 +1,28 @@
+{
+    "name": "gpt-live-lab",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "engines": {
+        "node": ">=22.15"
+    },
+    "scripts": {
+        "start": "node --env-file-if-exists=.env server.mjs",
+        "test": "node --test",
+        "check": "node --check server.mjs && node --check lib/runtime.mjs && node --check lib/handler-worker.mjs && node --check public/app.js && node --check public/audio.js",
+        "build": "esbuild client/editors.js --bundle --format=esm --minify --outfile=public/editors.bundle.js",
+        "prestart": "npm run build"
+    },
+    "dependencies": {
+        "@codemirror/lang-javascript": "^6.2.5",
+        "@codemirror/lang-json": "^6.0.2",
+        "@codemirror/state": "^6.7.6",
+        "@codemirror/theme-one-dark": "^6.1.3",
+        "@replit/codemirror-vim": "^6.4.0",
+        "codemirror": "^6.0.2",
+        "ws": "^8.18.3"
+    },
+    "devDependencies": {
+        "esbuild": "^0.28.2"
+    }
+}
