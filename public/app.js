@@ -1,5 +1,7 @@
 import { inspect, markdown } from './state.js';
 import { AudioIO } from './audio.js';
+import { voiceSetting, voiceValue } from './voice-setting.js';
+import { setupVoices } from './voices.js';
 const $ = id => document.getElementById(id);
 let socket, liveRun = null, viewedRun = null, selected = null, status = 'disconnected', micOn = false, micBusy = false, redrawTimer, reconnectTimer, draftTimer;
 const presets = kind => `export async function onDelegation(event, ctx) {
@@ -36,16 +38,16 @@ const audio = new AudioIO({ onFrame: frame => { if (status === 'connected' && so
 function config() {
   const initial = $('initialText').value;
   const session = { model: $('model').value.trim(), instructions: $('instructions').value,
-    audio: { format: { type: 'audio/pcm', rate: 24000 }, output: { voice: $('voice').value.trim() } },
+    audio: { format: { type: 'audio/pcm', rate: 24000 }, output: { voice: voiceSetting($('voice').value) } },
     delegation: { type: 'client', acknowledgement_delay_ms: Number($('delay').value) } };
   if (initial) session.input = [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: initial }] }];
   return { title: $('title').value, session, code: $('code').value, mode: $('mode').value,
-    browserSource: `${config.toString()}\n\n${command.toString()}`,
+    browserSource: `${voiceSetting.toString()}\n\n${config.toString()}\n\n${command.toString()}`,
     parameters: { waitMs: Math.max(0, Math.min(600000, Number($('waitMs').value) || 0)), result: $('result').value } };
 }
 function applyConfig(c) {
   $('title').value = c.title || '委譲中の一言を比較'; $('model').value = c.session.model; $('instructions').value = c.session.instructions;
-  $('voice').value = c.session.audio.output.voice; $('delay').value = c.session.delegation.acknowledgement_delay_ms;
+  $('voice').value = voiceValue(c.session.audio.output.voice); $('delay').value = c.session.delegation.acknowledgement_delay_ms;
   $('initialText').value = c.session.input?.find(x => x.role === 'user')?.content?.[0]?.text || '';
   $('code').value = c.code; $('mode').value = c.mode; $('waitMs').value = c.parameters?.waitMs ?? 3000; $('result').value = c.parameters?.result ?? '';
   dirty();
@@ -127,7 +129,7 @@ async function renderConnectionCode() {
   const source = historical ? run?.connectionSource : loadedConnectionSource;
   const sent = run?.events?.find(row => row.direction === 'SEND' && row.event.type === 'session.start');
   const ack = run?.events?.find(row => row.direction === 'RECV' && row.event.type === 'session.started');
-  $('configSource').textContent = historical ? (run?.config?.browserSource || 'この実験にはブラウザコードの記録がありません。') : `${config.toString()}\n\n${command.toString()}`;
+  $('configSource').textContent = historical ? (run?.config?.browserSource || 'この実験にはブラウザコードの記録がありません。') : `${voiceSetting.toString()}\n\n${config.toString()}\n\n${command.toString()}`;
   $('connectionSource').textContent = source?.code || 'この実験には送信コードの記録がありません。更新前の実験に現在のコードを実行済みとして表示することはしません。';
   $('connectionHash').textContent = source ? `${source.file} · SHA256 ${source.sha256}` : '';
   $('connectionExplanation').textContent = historical
@@ -165,6 +167,7 @@ $('instructions').value = 'あなたは親しみやすい日本語の音声ア�
 $('code').value = presets('silent');
 try { const draft = await fetch('/api/draft').then(r => r.json()); if (draft) applyConfig(draft); } catch {}
 preview(); rawTemplate(); setStatus('disconnected'); openControl(); render();
+setupVoices({ dirty, toast });
 try { const { mountEditors } = await import('/editors.bundle.js'); mountEditors(); }
 catch { toast('コードエディタを読み込めませんでした。通常の入力欄で編集できます。'); }
 window.addEventListener('beforeunload', () => socket?.close());

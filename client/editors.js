@@ -16,7 +16,7 @@ export function mountEditors() {
   toggle.checked = enabled;
   const editors = [];
   const valueDescriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-  for (const textarea of document.querySelectorAll('textarea')) {
+  for (const textarea of document.querySelectorAll('textarea:not([data-native])')) {
     const host = document.createElement('div');
     host.className = 'code-editor' + (textarea.id === 'code' ? ' delegation-editor' : '');
     textarea.after(host);

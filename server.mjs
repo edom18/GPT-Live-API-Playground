@@ -7,26 +7,43 @@ import { randomUUID, createHash } from 'node:crypto';
 import WebSocket, { WebSocketServer } from 'ws';
 import { Delegations, redact, recordPayload, validateConfig, withEventId } from './lib/runtime.mjs';
 import { openLiveSocket, connectionSource } from './lib/connection.mjs';
+import { createVoiceStore } from './lib/voices.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export async function startServer({ port = Number(process.env.PORT || 3210), apiKey = process.env.OPENAI_API_KEY,
-  endpoint = 'wss://api.openai.com/v1/live/sessions', dataDir = path.join(root, 'data'), userIdleMs = 60000 } = {}) {
+  endpoint = 'wss://api.openai.com/v1/live/sessions', dataDir = path.join(root, 'data'), userIdleMs = 60000, voiceFetch = fetch } = {}) {
   await mkdir(dataDir, { recursive: true });
   const secrets = Object.entries(process.env).filter(([k]) => /KEY|TOKEN|SECRET|PASSWORD/i.test(k)).map(([, v]) => v);
   if (apiKey) secrets.push(apiKey);
   const safe = value => redact(value, secrets);
+  const voices = createVoiceStore({ dataDir, apiKey, safe, fetchImpl: voiceFetch });
   let owner = null;
   const clients = new Set();
   const allowedHost = host => host === `localhost:${server.address()?.port}` || host === `127.0.0.1:${server.address()?.port}`;
   const server = http.createServer(async (req, res) => {
     try {
       if (!allowedHost(req.headers.host)) { res.writeHead(403).end('Local host only'); return; }
-      if (req.method !== 'GET') { res.writeHead(405).end(); return; }
       const pathname = new URL(req.url, 'http://localhost').pathname;
+      if (pathname === '/api/voices' && req.method === 'POST') {
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
+        if (req.headers.origin !== `http://${req.headers.host}` || req.headers['content-type']?.split(';')[0] !== 'application/json') {
+          res.writeHead(403).end(JSON.stringify({ error: '同一オリジンのJSONリクエストのみ受け付けます' })); return;
+        }
+        try {
+          const chunks = []; let bytes = 0;
+          for await (const chunk of req) { bytes += chunk.length; if (bytes > 24000) throw Object.assign(new Error('リクエストが大きすぎます'), { status: 413 }); chunks.push(chunk); }
+          const text = Buffer.concat(chunks).toString('utf8');
+          let input; try { input = JSON.parse(text); } catch { throw Object.assign(new Error('JSONが不正です'), { status: 400 }); }
+          res.end(JSON.stringify(safe(await voices.create(input))));
+        } catch (error) { res.writeHead(error.status || 500).end(JSON.stringify({ error: safe(error.message) })); }
+        return;
+      }
+      if (req.method !== 'GET') { res.writeHead(405).end(); return; }
       res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
       const styleNonce = randomUUID();
       res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${styleNonce}'; connect-src 'self'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'`);
       if (pathname === '/api/status') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ keyConfigured: Boolean(apiKey), busy: Boolean(owner) })); return; }
+      if (pathname === '/api/voices') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(await voices.list())); return; }
       if (pathname === '/api/connection-source') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(connectionSource)); return; }
       if (pathname === '/api/draft') { res.setHeader('Content-Type', 'application/json'); res.end(await readFile(path.join(dataDir, 'draft.json'), 'utf8').catch(() => 'null')); return; }
       if (pathname === '/api/runs') {
@@ -45,6 +62,7 @@ export async function startServer({ port = Number(process.env.PORT || 3210), api
       }
       const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/audio.js': 'audio.js', '/capture-worklet.js': 'capture-worklet.js', '/state.js': 'state.js' };
       files['/editors.bundle.js'] = 'editors.bundle.js';
+      files['/voices.js'] = 'voices.js'; files['/voice-setting.js'] = 'voice-setting.js';
       const name = files[pathname]; if (!name) { res.writeHead(404).end(); return; }
       res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8');
       const file = await readFile(path.join(root, 'public', name));
