@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>カスタム音声作成 · GPT-Live Lab</title><link rel="stylesheet" href="/style.css"><script type="module" src="/voice-creator.js"></script></head><body>
+<header><div class="brand"><span class="logo">L</span><div><h1>カスタム音声作成</h1><div class="subtitle">Prompt to voice · 単体ツール</div></div></div><span class="badge">LOCALHOST</span><div class="spacer"></div><a href="/">Playgroundへ戻る</a></header>
+<main class="panel single"><div class="heading"><h2>声の説明から音声を作成</h2></div><div class="body">
+<p class="hint">作成した音声は、作成に使ったAPIキーのプロジェクトでのみ利用できます。利用したいプロジェクトのキーを入力してください。キーは作成リクエストの送信にだけ使い、サーバー・ブラウザのどちらにも保存しません。</p>
+<form id="voiceForm"><label class="field"><span>OpenAI APIキー</span><input id="apiKey" type="password" autocomplete="off" spellcheck="false" required placeholder="sk-..."></label>
+<label class="field"><span>名前（最大256文字）</span><input id="voiceName" maxlength="256" required placeholder="例：落ち着いた日本語ガイド"></label>
+<label class="field"><span>声の説明（最大2,000文字）</span><textarea id="voicePrompt" maxlength="2000" required rows="5" placeholder="例：30代の成人を感じさせる落ち着いた声。自然な日本語の発音で、中低音、柔らかく明瞭な響き。ゆっくりと親しみやすく話す。"></textarea></label>
+<label class="field"><span>サンプル台詞 script_hint（任意 / 最大2,000文字）</span><textarea id="voiceScript" maxlength="2000" rows="3" placeholder="空欄ならAPIが自動生成。指定する場合は、声の特徴が伝わる十分な長さの台詞を記述してください。"></textarea></label>
+<p class="hint">声の高さ・質感・アクセント・話す速度などを記述して成人の声を作成します。実在の人物の模倣ではなく、声の特徴を指定してください。生成モデル: auto。押すたびに新しい音声を作成し、通信失敗時も自動再試行しません。</p>
+<button type="submit" id="createVoice" class="primary">作成する</button></form>
+<p id="voiceMessage" role="status" aria-live="polite"></p>
+<div id="voiceResult" hidden><hr class="rule"><div class="row"><h3>作成した音声ID</h3><button id="copyVoiceId">IDをコピー</button></div><pre id="voiceId" class="mono"></pre><pre id="voiceDetails"></pre>
+<p class="hint">このページは作成結果を保存しません。IDを控えてください。Liveでは <code>session.audio.output.voice: { id: "voice_..." }</code> として指定し、公式推奨に従って声の説明もinstructionsに含めてください。作成APIは試聴音声を返しません。出力される声はAI生成です。</p>
+<button id="openTest" class="primary">作成した音声でテスト</button>
+<section id="voiceTest" hidden><hr class="rule"><h3>作成した音声でテスト</h3>
+<label class="field"><span>指示プロンプト（instructions / 最大20,000文字）</span><textarea id="testInstructions" maxlength="20000" rows="6"></textarea></label>
+<p class="hint">上のAPIキーで <code>gpt-live-1</code> に接続し、作成した音声で会話します。マイクで話しかけて声の感じを確認してください。指示プロンプトの変更は次の接続から反映します。接続中は利用料金が発生します。発話が1分間ないと自動で終了します。会話内容は保存しません。</p>
+<div class="row"><button id="startTest" class="primary">接続して会話を開始</button><button id="stopTest" disabled>終了</button><button id="testMic" disabled>マイク ON</button><b id="testStatus" role="status" aria-live="polite">未接続</b></div>
+<div id="testTranscript" class="transcript"></div>
+<details id="testDebug"><summary>デバッグ: Liveとの送受信データ（<span id="debugCount">0</span>件）</summary>
+<p class="hint">このテスト接続でNodeとLiveの間を流れたイベントです。<code>session.start</code> が送信した設定、<code>session.started</code> がAPIの適用した設定です。音声フレーム（input_audio.append / output_audio.delta）は省略しています。APIキーは伏せ字にし、保存しません。新しい接続を始めると消去します。</p>
+<pre id="debugLog" class="debug-log"></pre></details></section></div>
+<a href="https://developers.openai.com/api/docs/guides/custom-voices" target="_blank" rel="noreferrer">公式カスタム音声ガイド</a>
+</div></main></body></html>
