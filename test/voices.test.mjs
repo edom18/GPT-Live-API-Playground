@@ -64,3 +64,33 @@ test('concurrent creation is rejected instead of producing duplicate voices', as
   release(Response.json({ id: 'voice_one', name: 'Test', type: 'prompt', created_at: 1 }));
   assert.equal((await first).voice.id, 'voice_one');
 });
+
+test('voice creator page uses the per-request key, never stores or echoes it', async t => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'live-voice-creator-'));
+  const requests = []; let fail = false;
+  const voiceFetch = async (url, options) => {
+    requests.push({ url, options });
+    return fail ? Response.json({ error: { message: 'Incorrect API key provided: user-key-12345' } }, { status: 401 })
+      : Response.json({ id: 'voice_tool', name: 'Tool', type: 'prompt', prompt: 'Adult voice', created_at: 1 });
+  };
+  const app = await startServer({ port: 0, apiKey: 'server-env-key', dataDir, voiceFetch });
+  t.after(() => app.close());
+  const post = (body, origin = app.url) => fetch(`${app.url}/api/voice-creator`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify(body) });
+  const input = { apiKey: ' user-key-12345 ', name: 'Tool', prompt: 'Adult voice' };
+  assert.equal((await fetch(`${app.url}/voice-creator`)).status, 200);
+  assert.equal((await post(input, 'https://untrusted.example')).status, 403);
+  assert.equal((await post({ ...input, apiKey: '' })).status, 400);
+  assert.equal((await post({ ...input, apiKey: 'has space' })).status, 400);
+  assert.equal(requests.length, 0);
+  const res = await post(input); assert.equal(res.status, 200);
+  const text = await res.text();
+  assert.equal(JSON.parse(text).voice.id, 'voice_tool');
+  assert.ok(!text.includes('user-key-12345'));
+  assert.equal(requests[0].options.headers.Authorization, 'Bearer user-key-12345');
+  assert.deepEqual(JSON.parse(requests[0].options.body), { type: 'prompt', name: 'Tool', prompt: 'Adult voice', model: 'auto' });
+  assert.deepEqual(await fetch(`${app.url}/api/voices`).then(r => r.json()), []);
+  fail = true;
+  const failed = await post(input); assert.equal(failed.status, 401);
+  const failedText = await failed.text();
+  assert.ok(failedText.includes('[REDACTED]') && !failedText.includes('user-key-12345'));
+});

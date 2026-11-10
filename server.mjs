@@ -7,7 +7,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import WebSocket, { WebSocketServer } from 'ws';
 import { Delegations, redact, recordPayload, validateConfig, withEventId } from './lib/runtime.mjs';
 import { openLiveSocket, connectionSource } from './lib/connection.mjs';
-import { createVoiceStore } from './lib/voices.mjs';
+import { createVoiceStore, createVoiceCreator } from './lib/voices.mjs';
+import { handleVoiceTest } from './lib/voice-test.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export async function startServer({ port = Number(process.env.PORT || 3210), apiKey = process.env.OPENAI_API_KEY,
@@ -17,6 +18,7 @@ export async function startServer({ port = Number(process.env.PORT || 3210), api
   if (apiKey) secrets.push(apiKey);
   const safe = value => redact(value, secrets);
   const voices = createVoiceStore({ dataDir, apiKey, safe, fetchImpl: voiceFetch });
+  const voiceCreator = createVoiceCreator({ fetchImpl: voiceFetch });
   let owner = null;
   const clients = new Set();
   const allowedHost = host => host === `localhost:${server.address()?.port}` || host === `127.0.0.1:${server.address()?.port}`;
@@ -24,7 +26,15 @@ export async function startServer({ port = Number(process.env.PORT || 3210), api
     try {
       if (!allowedHost(req.headers.host)) { res.writeHead(403).end('Local host only'); return; }
       const pathname = new URL(req.url, 'http://localhost').pathname;
-      if (pathname === '/api/voices' && req.method === 'POST') {
+      const postRoutes = {
+        '/api/voices': async input => safe(await voices.create(input)),
+        // The per-request key must never come back in a response, including OpenAI error text.
+        '/api/voice-creator': async input => {
+          const mask = value => redact(safe(value), [input?.apiKey?.trim?.()]);
+          try { return mask(await voiceCreator.create(input)); } catch (error) { error.message = mask(error.message); throw error; }
+        },
+      };
+      if (postRoutes[pathname] && req.method === 'POST') {
         res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
         if (req.headers.origin !== `http://${req.headers.host}` || req.headers['content-type']?.split(';')[0] !== 'application/json') {
           res.writeHead(403).end(JSON.stringify({ error: '同一オリジンのJSONリクエストのみ受け付けます' })); return;
@@ -34,7 +44,7 @@ export async function startServer({ port = Number(process.env.PORT || 3210), api
           for await (const chunk of req) { bytes += chunk.length; if (bytes > 24000) throw Object.assign(new Error('リクエストが大きすぎます'), { status: 413 }); chunks.push(chunk); }
           const text = Buffer.concat(chunks).toString('utf8');
           let input; try { input = JSON.parse(text); } catch { throw Object.assign(new Error('JSONが不正です'), { status: 400 }); }
-          res.end(JSON.stringify(safe(await voices.create(input))));
+          res.end(JSON.stringify(await postRoutes[pathname](input)));
         } catch (error) { res.writeHead(error.status || 500).end(JSON.stringify({ error: safe(error.message) })); }
         return;
       }
@@ -63,6 +73,7 @@ export async function startServer({ port = Number(process.env.PORT || 3210), api
       const files = { '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/audio.js': 'audio.js', '/capture-worklet.js': 'capture-worklet.js', '/state.js': 'state.js' };
       files['/editors.bundle.js'] = 'editors.bundle.js';
       files['/voices.js'] = 'voices.js'; files['/voice-setting.js'] = 'voice-setting.js';
+      files['/voice-creator'] = 'voice-creator.html'; files['/voice-creator.js'] = 'voice-creator.js';
       const name = files[pathname]; if (!name) { res.writeHead(404).end(); return; }
       res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8');
       const file = await readFile(path.join(root, 'public', name));
@@ -71,8 +82,12 @@ export async function startServer({ port = Number(process.env.PORT || 3210), api
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
   server.on('upgrade', (req, socket, head) => {
-    if (req.url !== '/control' || !allowedHost(req.headers.host) || req.headers.origin !== `http://${req.headers.host}`) { socket.destroy(); return; }
-    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
+    if (!['/control', '/voice-test'].includes(req.url) || !allowedHost(req.headers.host) || req.headers.origin !== `http://${req.headers.host}`) { socket.destroy(); return; }
+    wss.handleUpgrade(req, socket, head, ws => {
+      if (req.url === '/control') { wss.emit('connection', ws); return; }
+      clients.add(ws); ws.on('close', () => clients.delete(ws));
+      handleVoiceTest(ws, { WebSocket, endpoint, userIdleMs, safe });
+    });
   });
   wss.on('connection', client => {
     clients.add(client);
